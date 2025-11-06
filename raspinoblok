@@ -1,0 +1,128 @@
+import requests
+import time
+import RPi.GPIO as GPIO
+
+# Konfigurasi GPIO
+TD = 26  # Tape Defect
+ES = 27  # Element Stitch
+C1 = 16  # Camera 1
+C2 = 5   # Camera 2
+MT = 6   # Motor running sensor
+JB = 24  # J-Box
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+
+# Setup GPIO pins as input dengan pull-up/down sesuai kebutuhan
+GPIO.setup(TD, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(ES, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(C1, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(C2, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(MT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(JB, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+mesin = 'CH0045'  # sesuaikan dengan no mesin
+
+# URL target
+url = "http://10.246.142.20/pdgeneral/kirim_data/sensor_inspection/"
+
+# Fungsi untuk kirim data ke server
+def send_data(param):
+    full_url = f"{url}{mesin}-{param}"
+    try:
+        response = requests.get(full_url, timeout=2)  # timeout ditambahkan agar tidak hang
+        print(f"Sent: {param}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to send data: {e}")
+
+# Variabel status awal
+current_status = None       # belum tahu kondisi saat boot
+last_sent_status = None
+last_sent_time = 0
+last_sent_sensor = None
+
+# Untuk sensor dengan delay
+first_triggered_sensor = None
+first_trigger_time = None
+delay_threshold = 7.5
+
+# Mode J-Box
+jb_active_time = 0
+jb_mode = False
+
+try:
+    while True:
+        # Baca status sensor
+        td_state = GPIO.input(TD)
+        es_state = GPIO.input(ES)
+        c1_state = GPIO.input(C1)
+        c2_state = GPIO.input(C2)
+        mt_state = GPIO.input(MT)
+        jb_state = GPIO.input(JB)
+        current_time = time.time()
+
+        # Cek trigger dari J-Box
+        if jb_state == GPIO.LOW and not jb_mode:
+            jb_active_time = current_time
+            jb_mode = True
+            print("J-Box triggered, entering 35s mode.")
+
+        # Jika J-Box aktif 35 detik
+        if jb_mode:
+            if current_time - jb_active_time <= 35:
+                current_status = "16"  # J-Box aktif
+            else:
+                jb_mode = False  # reset setelah 35 detik
+                current_status = None  # kosongkan agar sensor bisa dibaca ulang
+        else:
+            # Jika tidak dalam mode J-Box, cek sensor
+            if es_state == GPIO.HIGH and first_triggered_sensor is None:
+                first_triggered_sensor = "12"
+                first_trigger_time = current_time
+
+            if c1_state == GPIO.HIGH and first_triggered_sensor is None:
+                first_triggered_sensor = "13"
+                first_trigger_time = current_time
+
+            if c2_state == GPIO.HIGH and first_triggered_sensor is None:
+                first_triggered_sensor = "14"
+                first_trigger_time = current_time
+
+            # Reset trigger setelah delay
+            if first_trigger_time and (current_time - first_trigger_time > delay_threshold):
+                first_triggered_sensor = None
+                first_trigger_time = None
+
+            # Logika status
+            if mt_state == GPIO.HIGH:  # Motor running
+                if first_triggered_sensor:
+                    current_status = first_triggered_sensor
+                    last_sent_sensor = first_triggered_sensor
+                else:
+                    current_status = "15"  # Motor running
+                    last_sent_sensor = "15"
+            else:  # Motor mati
+                if td_state == GPIO.HIGH:
+                    current_status = "11"  # Tape Defect
+                    last_sent_sensor = "11"
+                else:
+                    # Jangan paksa jadi "10" kalau standby,
+                    # biarkan tetap None sampai sensor aktif
+                    if last_sent_sensor is None:
+                        current_status = None
+                    else:
+                        current_status = last_sent_sensor
+
+        # Kirim data jika status berubah atau tiap 10 detik
+        if current_status is not None and (current_status != last_sent_status or (current_time - last_sent_time >= 10)):
+            send_data(current_status)
+            last_sent_status = current_status
+            last_sent_time = current_time
+
+        time.sleep(0.02)  # 20 ms delay
+
+except KeyboardInterrupt:
+    print("Program terminated by user.")
+finally:
+    GPIO.cleanup()
+
