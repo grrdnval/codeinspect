@@ -1,0 +1,71 @@
+import requests
+import time
+import RPi.GPIO as GPIO
+
+MT = 17
+WP = 23
+WC = 24
+MF = 25
+NE = 26
+ 
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+
+GPIO.setup(MT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(WP, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(WC, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(MF, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(NE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+BASE_URL = "http://10.246.142.20/pdgeneral/kirim_data/sensor"
+ 
+def send_data(no_mc):
+    try:
+        # Kirim via GET (lebih ringan)
+        params = {"data": no_mc}
+        response = requests.get(BASE_URL, params=params, timeout=5)
+        response.raise_for_status()
+        print(f"[INFO] Data terkirim: {no_mc}")
+    except requests.RequestException as e:
+        print(f"[ERROR] kirim data gagal: {e}")
+ 
+previous_data = None
+ 
+try:
+    while True:
+        MT_state = GPIO.input(MT)
+        WP_state = GPIO.input(WP)
+        WC_state = GPIO.input(WC)
+        MF_state = GPIO.input(MF)
+        NE_state = GPIO.input(NE)
+         
+        if NE_state == GPIO.HIGH:
+            if WP_state == GPIO.HIGH and MT_state == GPIO.HIGH:
+                current_data = "MCWV05-4"
+            elif WP_state == GPIO.HIGH and MT_state == GPIO.LOW:
+                current_data = "MCWV05-4"
+            elif WC_state == GPIO.HIGH and MT_state == GPIO.HIGH:
+                current_data = "MCWV05-5"
+            elif WC_state == GPIO.HIGH and MT_state == GPIO.LOW:
+                current_data = "MCWV05-5"
+            elif MF_state == GPIO.HIGH and MT_state == GPIO.HIGH:
+                current_data = "MCWV05-2"
+            elif MF_state == GPIO.HIGH and MT_state == GPIO.LOW:
+                current_data = "MCWV05-2"
+            elif MT_state == GPIO.HIGH:
+                current_data = "MCWV05-3"
+            else:
+                current_data = "MCWV05-7" #motor stop
+        else:
+            current_data = "MCWV05-8" #no electric (NE)
+            
+        if current_data != previous_data:
+            send_data(current_data)
+            previous_data = current_data
+ 
+        time.sleep(0.2)
+ 
+except KeyboardInterrupt:
+    print("Program Stop")
+finally:
+    GPIO.cleanup()
