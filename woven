@@ -17,7 +17,7 @@ GPIO.setup(WC, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(MF, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(NE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-BASE_URL = "http://10.246.142.20/pdgeneral/kirim_data/sensor"
+BASE_URL = "http://10.246.142.18/pdgeneral/kirim_data/sensor"
  
 def send_data(no_mc):
     try:
